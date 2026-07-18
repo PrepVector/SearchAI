@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SEARCH AI — Premium Research Generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<style>[hidden]{display:none!important}</style>
+<link rel="stylesheet" href="style.css?v=2026.07.13-18">
+<script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script defer src="app.js?v=2026.07.13-18"></script>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ======================= HERO / INPUT ======================= -->
+  <header class="hero">
+    <h1 class="brand">SEARCH <span>AI</span></h1>
+    <p class="tagline">Multi-model research engine · outline-bound articles · verified visuals</p>
+
+    <div class="search-shell neu-inset">
+      <input id="topicInput" type="text" autocomplete="off"
+             placeholder="Search any topic — e.g. why do neural networks overfit"
+             maxlength="600">
+      <button id="btnOutline" class="btn btn-primary">Create Outline</button>
+      <button id="btnGenerate" class="btn btn-accent" disabled>Generate</button>
+    </div>
+
+    <div class="hero-row">
+      <button id="btnAdvanced" class="chip neu-raise" aria-expanded="false">
+        <span class="chip-dot"></span> Advanced Options
+      </button>
+      <div class="chip quality-lock neu-inset" title="Premium multi-agent quality pipeline is always active">
+        <span class="lock-icon">🔒</span> Quality Lock <b>ON</b>
+      </div>
+      <span id="providerStatus" class="provider-status"></span>
+    </div>
+
+    <!-- ---------- advanced options panel ---------- -->
+    <section id="advancedPanel" class="advanced neu-raise" hidden>
+      <div class="opt-grid">
+
+        <label class="opt">
+          <span class="opt-label">Article format</span>
+          <select id="optFormat" class="neu-inset">
+            <option value="auto" selected>Auto (adaptive)</option>
+            <option value="research_paper">Research paper</option>
+            <option value="strategic_briefing">Strategic briefing</option>
+            <option value="decision_memo">Decision memo</option>
+            <option value="technical_field_guide">Technical field guide</option>
+            <option value="mathematical_explainer">Mathematical explainer</option>
+            <option value="security_operations_report">Security ops report</option>
+            <option value="implementation_playbook">Implementation playbook</option>
+            <option value="comparative_analysis">Comparative analysis</option>
+            <option value="historical_timeline">Historical timeline</option>
+            <option value="current_intelligence_briefing">Current intelligence briefing</option>
+          </select>
+        </label>
+
+        <label class="opt">
+          <span class="opt-label">Images in article</span>
+          <select id="optImageCount" class="neu-inset">
+            <option>0</option><option>3</option><option>4</option>
+            <option selected>5</option><option>6</option><option>8</option>
+            <option>10</option><option>12</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="toggles">
+        <label class="toggle"><input type="checkbox" id="optCurrent" checked>
+          <span class="track"></span> Current findings check</label>
+        <label class="toggle"><input type="checkbox" id="optWeb" checked>
+          <span class="track"></span> Web research</label>
+      </div>
+    </section>
+  </header>
+
+  <!-- ======================= STATUS / PROGRESS ======================= -->
+  <section id="statusBar" class="status neu-raise" hidden>
+    <div class="spinner"></div>
+    <div>
+      <div id="statusTitle" class="status-title">Working…</div>
+      <div id="statusDetail" class="status-detail"></div>
+    </div>
+  </section>
+  <section id="errorBar" class="status error neu-raise" hidden>
+    <div class="error-icon">!</div>
+    <div id="errorText" class="status-detail"></div>
+  </section>
+
+  <!-- ======================= OUTLINE EDITOR ======================= -->
+  <section id="outlinePanel" class="panel neu-raise" hidden>
+    <div class="panel-head">
+      <h2>Approve the outline</h2>
+      <p>The article is contractually bound to this outline — edit titles and
+         subpoints, reorder or remove sections, then press <b>Generate</b>.</p>
+    </div>
+    <input id="outlineTitle" class="outline-title neu-inset" type="text">
+    <div id="outlineLayout" class="layout-tag"></div>
+    <div id="outlineSections" class="outline-sections"></div>
+    <button id="btnAddSection" class="btn btn-ghost">+ Add section</button>
+  </section>
+
+  <!-- ======================= ARTICLE ======================= -->
+  <section id="articlePanel" class="panel article-panel neu-raise" hidden>
+    <div class="article-toolbar">
+      <button id="btnPdf" class="btn btn-primary">⬇ Download PDF</button>
+      <button id="btnDocx" class="btn btn-primary">⬇ Download Word</button>
+      <button id="btnDiagnostics" class="btn btn-ghost">Diagnostics & Agent Trace</button>
+    </div>
+    <article id="articleRoot" class="article"></article>
+  </section>
+
+  <!-- ======================= DIAGNOSTICS ======================= -->
+  <section id="diagPanel" class="panel neu-raise" hidden>
+    <div class="panel-head"><h2>Diagnostics & Agent Trace</h2></div>
+    <div id="diagSummary" class="diag-summary"></div>
+    <div id="diagWarnings" class="diag-warnings"></div>
+    <div id="diagTrace" class="diag-trace"></div>
+  </section>
+
+  <footer class="footer">SEARCH AI · runs locally · configure providers in <code>.env</code><span class="build-tag">· build 2026.07.13-18</span></footer>
+</div>
+
+<!-- fullsize image preview -->
+<div id="lightbox" class="lightbox" hidden>
+  <img id="lightboxImg" alt="figure preview">
+  <div id="lightboxCap" class="lightbox-cap"></div>
+</div>
+
+</body>
+</html>
