@@ -1,117 +1,207 @@
-# SEARCH AI
+# SEARCH AI — Claude Code Edition
 
-**A local, multi-model AI research engine that turns any topic into a premium, outline-bound research article or builder's playbook — grounded in live evidence, illustrated with verified figures, and exportable to pixel-perfect PDF and Word.**
+A research + professional content-generation agent that runs entirely
+inside [Claude Code](https://docs.claude.com/en/docs/claude-code) — no
+server, no API key, no separate billing. It is **not** a LinkedIn/social
+content generator, scheduler, or marketing automation tool: there is no
+posting, no engagement analytics, no content calendar. It plans a research
+question, gathers and audits evidence, drafts an outline you approve
+before any prose is written, writes and quality-gates a full report, and
+publishes it as a clean, properly-cited markdown document with figures.
 
-Type a topic. Approve, edit, regenerate, or discard the proposed outline — or just press **Generate** and let it run end to end. A consolidated agent pipeline researches the web and academic literature, drafts in pure markdown with extended thinking, matches the register your topic actually needs, refuses to invent sources, validates itself against your exact query, embeds verified images, and hands you a finished article.
+If you want the same pipeline as a standalone web app that calls the
+Anthropic/Gemini APIs directly (with its own token-usage accounting and a
+browser UI), see the sibling **SEARCH AI — API Edition** package instead.
+This edition is for using SEARCH AI *inside* a Claude Code session, where
+the reasoning steps are Claude Code subagents rather than raw API calls.
 
-Runs entirely on your machine. Bring your own API keys. No hosted service, no telemetry.
+## What's in here
 
----
-
-## Why the output reads like a frontier chat model — and then some
-
-SEARCH AI was rebuilt around one idea: *let the frontier models write the way they write best, then hold the result to contracts no chat app enforces.*
-
-- **Fable-first writing** — the writer and editor default to `anthropic → openai → gemini`, so Claude-class models draft and polish while fast, cheap models handle research and validation.
-- **No JSON tax** — the writer produces pure delimited markdown, not escaped JSON. Prose quality is measurably higher outside JSON string-encoding.
-- **Extended thinking** — writing and polishing calls carry a thinking budget, so the model plans before it drafts (auto-disabled per model if unsupported).
-- **Register intelligence** — a how-to / implementation topic produces a real **builder's playbook** (verb-first steps, copy-paste artifacts in fenced blocks, one worked example threaded throughout, mapping tables); a research topic gets a scholarly analyst register. The costume matches the occasion.
-- **Truth boundary** — the writer never presents a tool, product, plugin, statistic, threshold or version as real unless the evidence contains it; illustrative material is framed as reader-created. Credibility filtering and the validator both hunt invented entities.
-- **Chunked two-pass writing** — long outlines are written in two halves with a verbatim continuity handoff, so the output-token ceiling never silently truncates depth.
-- **Depth ladder + narrative thread** — every major claim descends claim → mechanism → quantification → implication; every section opens by advancing from the previous one's endpoint.
-- **And the contracts** — query lock, deterministic outline contract, verified current facts injected *before* writing, a combined quality audit with a corrective-rewrite loop, and a pre-publish gate. A chat one-shot can't do any of that.
-
-## Feature highlights
-
-- **One Research Director** call decodes the query (query lock, drift list, domain, intent, time-sensitivity), writes the research brief (answer contract, three-horizon search queries), and plans retrieval — user toggles always override its plan.
-- **Grounded research**: Tavily + Exa + SerpAPI merged and credibility-filtered; OpenAlex + Crossref blending seminal papers with the latest publications; official-docs prioritization; fabrication-risk sources dropped.
-- **Current Facts Prefetch**: for time-sensitive topics, verified dated facts are fetched *before* writing and override the model's training memory.
-- **Editable outline** with adaptive layouts, per-section bridges and key questions, and a narrative thread. Review it, edit anything, reorder, **↻ Regenerate**, or **✕ Discard** — and once approved it is a **hard contract** enforced by deterministic code.
-- **One intelligent image mode**: verified web figures are hunted, LLM-judged for explanatory value, downloaded server-side (thumbnail fallback rescues hotlink-blocked originals), and embedded into the article itself; generated topic-specific visuals — labelled from the article's own concepts, never generic placeholders or invented charts — fill any gap. Delivered count always equals your setting.
-- **One Quality Validator** audits facts, topic integrity (0–100), and answer intent in a single pass — judged within your outline's scope, with deterministic reconciliation, invented-entity detection, and a conditional corrective-rewrite loop.
-- **Exports**: block-aware A4 PDF (page breaks never cut a table, figure or code block) and Word with real heading hierarchy, styled tables, embedded images, a key-takeaways section and numbered references.
-- **Diagnostics & Agent Trace**: per-agent timings, validation scores, image fetch statistics, warnings, and total wall time — every run explains itself.
-
----
-
-## Quick start (Windows — one click)
-
-1. **Download / clone** this repository.
-2. Copy `backend/.env.example` → `backend/.env` and paste **at least one** text provider (API key **and** model name). For the best prose, set an Anthropic key.
-3. Double-click **`START_SEARCH_AI.bat`**.
-
-The launcher creates a virtual environment, installs dependencies, stops any stale server on the port, starts the backend, and opens your browser at a cache-proof URL. The terminal banner prints the build number, port, and exactly which `.env` was loaded.
-
-> Requires **Python 3.10+** (tested up to 3.14 free-threaded). Avoid the Microsoft Store Python stub — install from [python.org](https://www.python.org/downloads/) with **Add to PATH** ticked.
-
-### Manual start (any OS)
-
-```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env    # then edit it
-python run.py
+```
+.claude/
+  agents/      11 subagent definitions — the specialists that do the
+               actual reasoning (research-planner, evidence-scout,
+               outline-architect, research-writer, quality-auditor,
+               repair-editor, visual-curator, ...) plus three purely
+               mechanical ones (source-auditor, evidence-mapper,
+               final-publisher) that just run a script and report back.
+  commands/    Slash commands you run directly: /setup, /run-research,
+               /start-ui, /add-writing-sample, /add-research-rule,
+               /review-memory.
+  settings.json  Pre-approves the specific tool calls SEARCH AI's own
+               pipeline needs (running python3 scripts, editing files
+               inside this project, web search/fetch for evidence) so a
+               run doesn't stop to ask permission for its own routine
+               steps. See "Permissions" below before you rely on this.
+scripts/       Dependency-free, stdlib-only Python — the deterministic
+               "code decides, models propose" logic (source dedup/
+               credibility, evidence numbering, outline-contract
+               enforcement, the quality gate, visual-contract structural
+               checks, citation/reference assembly, markdown rendering).
+               No pip install needed.
+knowledge_base/  Your standing research profile, source/content rules,
+               writing samples, feedback log, and research memory —
+               plain markdown you can read and hand-edit any time.
+research_runs/  Where each research run's working files and final output
+               land, one timestamped folder per run.
+templates/     Reference docs for the article format and a worked example
+               outline, mostly useful if you're modifying the agents.
+ui/server.py   Optional local browser dashboard — a topic box and a
+               START button, as an alternative to typing /run-research.
+               See "Browser dashboard" below.
 ```
 
-Open the URL shown in the terminal (default `http://127.0.0.1:8025`).
+## Getting started
 
----
+1. Drop this folder's contents into (or open Claude Code inside) the
+   project root you want SEARCH AI available in — `.claude/` is what
+   Claude Code discovers automatically.
+2. Make sure `python3` is on your PATH — every deterministic step depends
+   on it, and nothing else needs installing (no `pip install`, no `.env`,
+   no API key of any kind).
+3. Run `/setup` once. It's a short conversational interview that fills in
+   your research profile, source preferences, and content rules under
+   `knowledge_base/` — skip anything you don't have an opinion on yet, the
+   templates already have sensible defaults.
+4. Run `/run-research <a topic you actually want researched>`. You'll be
+   asked to approve (or edit, or regenerate) the outline before any full
+   prose is written — that checkpoint is mandatory by design, not a
+   formality. The finished report lands at
+   `research_runs/<timestamp>_<slug>/output/article.md`.
 
-## Configuration (`backend/.env`)
+   Add `--newsletter` for a curated-links edition instead of a single
+   deep-dive report — same pipeline, same approval checkpoint, but the
+   outline becomes an intro plus one short item per distinct piece of
+   evidence found, e.g. `/run-research --newsletter this week in AI
+   research`. See "Content types" below.
 
-Everything is environment-driven — no model names are hardcoded anywhere.
+Ongoing commands:
+- `/review-memory` — see or edit your standing research memory directly.
+- `/add-writing-sample` — paste in a piece of writing whose voice future
+  reports should match.
+- `/add-research-rule` — add a standing source or content rule outside the
+  periodic feedback prompt.
+- `/start-ui` — launch the optional browser dashboard (see below) instead
+  of typing `/run-research` by hand.
 
-| Group | Variables | Notes |
-|---|---|---|
-| Text providers | `ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL`, `OPENAI_*`, `GEMINI_*`, `OPENAI_COMPAT_*` | At least one pair required |
-| Fallback chains | `*_FALLBACK_MODELS` | Comma-separated, tried in order |
-| Role routing | `TEXT_PROVIDER_ORDER`, `EDITOR_PROVIDER_ORDER` (default `anthropic,openai,gemini`), `RESEARCH_PROVIDER_ORDER`, `VALIDATOR_PROVIDER_ORDER`, `IMAGE_PROVIDER_ORDER` | Premium prose from writer/editor; speed from research/validation |
-| Premium prose | `ENABLE_EXTENDED_THINKING` (default true), `THINKING_BUDGET_TOKENS` (default 4096) | Think before writing/polishing |
-| Web research | `TAVILY_API_KEY`, `EXA_API_KEY`, `SERPAPI_API_KEY` | Any subset; SerpAPI also powers image search |
-| Academic | `OPENALEX_EMAIL`, `CROSSREF_EMAIL` | Keyless polite-pool |
-| Images | `GEMINI_IMAGE_MODEL` / `OPENAI_IMAGE_MODEL` + fallbacks | Optional; deterministic SVG engine covers gaps |
-| Quality | `PREMIUM_AI_QUALITY_MODE` (Quality Lock) | Enables the polish pass |
-| Server | `SEARCH_AI_HOST`, `SEARCH_AI_PORT`, `LLM_TIMEOUT_SECONDS` | Launcher reads the port |
+## Permissions
 
-Legacy variable names from earlier builds are accepted as aliases.
+This package ships a `.claude/settings.json` that pre-approves exactly
+the tool calls SEARCH AI's own pipeline needs — running `python3 <script>`
+(both as a Bash command and, on native Windows without Git for Windows,
+as a PowerShell command), editing files inside this project folder, and
+web search/fetch for evidence-scout. With it in place, a run shouldn't
+stop mid-pipeline to ask "can I run this command?" for its own routine
+steps — you'll still be asked about anything outside that list, and
+Claude Code's own built-in circuit breakers (e.g. deleting your home
+directory) are never overridden.
 
----
+**One-time step this file needs from you:** Claude Code only applies a
+project's `permissions.allow` rules once you've accepted its one-time
+"trust this folder" prompt, and that prompt only appears in an
+*interactive* session — it never appears in headless mode (which is what
+the browser dashboard uses under the hood). So: run `claude` normally in
+this folder at least once after unzipping this package, accept the trust
+prompt if one appears, and every future run — interactive or via the
+dashboard — will honor these pre-approvals.
 
-## Using it
+## Browser dashboard (optional)
 
-See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the full UI walkthrough and agent-by-agent internals, and **[REQUIREMENTS.txt](REQUIREMENTS.txt)** for the complete product specification (inputs, outputs, functional requirements).
+If you'd rather click a button than type slash commands, run:
 
-The short version: type a topic → **Create Outline** (edit / reorder / ↻ Regenerate / ✕ Discard) or press **Generate** directly → watch the live stage ticker and elapsed clock → read the article (abstract, direct answer, key takeaways, numbered sections, figures with source labels and lightbox, references) → **Download PDF / Word** → open **Diagnostics** to see exactly what every agent did.
+    python3 ui/server.py
 
-## Troubleshooting
+or, from inside a Claude Code session in this folder, just run
+`/start-ui`. Either way it opens `http://127.0.0.1:8787` in your browser:
+type a topic, hit **START**, and watch live progress; when the outline is
+ready you'll see it right there with **Approve & Write Full Report**,
+**Regenerate with Feedback**, and **Discard** buttons — the same mandatory
+checkpoint as the terminal flow, just in a browser tab. It's a thin
+wrapper around `claude -p` (Claude Code's own headless/scriptable mode)
+running the identical `/run-research` command from outside instead of
+inside an interactive session — nothing about the underlying pipeline
+changes.
 
-| Symptom | Fix |
-|---|---|
-| Launcher closes instantly | Extract the ZIP fully; don't run from inside the archive. |
-| `Python was not found` | Install full Python from python.org with **Add to PATH**. |
-| "no LLM key" warning | The banner shows which `.env` loaded — set a key **and** model there, restart. |
-| Build mismatch banner | Close old `127.0.0.1` tabs; the launcher's boot URL bypasses stale cache. Header, footer and terminal must show the same build. |
-| "Writer produced no sections" | A model ignored the output format — the chain retries automatically; add fallback models in `.env`. |
-| Few reference images | Diagnostics shows fetch stats; add `SERPAPI_API_KEY` for the strongest image search. |
+When a run finishes, the dashboard renders the finished report right there
+on the page (headings, lists, blockquotes, and figures — not raw
+markdown text), with a **Download PDF** button above it. The PDF is built
+by a small dependency-free PDF writer bundled in `ui/server.py` — no pip
+install, no external converter, no browser print dialog. One deliberate
+trade-off: the PDF embeds each figure as a bracketed text placeholder
+("[Figure: ... -- see the dashboard or article.md for the image]")
+rather than the actual image, since drawing arbitrary SVG figures inside
+a hand-written PDF would need a real vector-graphics translator. The
+on-screen dashboard view and `research_runs/<run>/output/article.md`
+both remain the full-fidelity versions with the actual figures — the PDF
+is for sharing/printing the text, not a replacement for either.
 
-## Security
+This is newer and less road-tested than `/run-research` typed directly
+into Claude Code, since it depends on the CLI's headless output format
+and session-resume behavior rather than an interactive conversation. Each
+run's status panel includes a **Debug** section with the exact
+`claude --resume <session_id>` command to pick that same conversation up
+by hand in a terminal if the dashboard ever seems stuck — the terminal is
+always the fallback, never required to be replaced.
 
-`backend/.env` holds live API keys — **never commit it**. Add a `.gitignore` before your first commit:
+## How a run works
 
-```gitignore
-backend/.env
-backend/.venv/
-__pycache__/
-*.pyc
-```
+`/run-research` is the orchestrator: it creates a run folder, invokes each
+specialist subagent in order, and runs the deterministic scripts itself in
+between. Two design choices matter if you're reading the agents/scripts
+directly:
 
-The app binds to `127.0.0.1` and is intended for local, single-user use. A key pushed to a public repo should be considered compromised and rotated.
+- **The outline checkpoint is a hard stop.** The pipeline will not write a
+  full draft from an outline you haven't explicitly approved, edited, or
+  regenerated with feedback.
+- **Deterministic steps never ask a model to re-judge structural facts.**
+  Source deduplication/credibility, evidence numbering, outline-contract
+  alignment, the accept/rewrite/polish quality gate, and citation/
+  reference-list assembly are all plain Python in `scripts/`, not LLM
+  calls — a model proposes content, code decides whether it's structurally
+  sound. This also means those steps are fast, free, and reproducible.
+- **The repair loop is capped** (default 4 passes) and always reports its
+  true final status — a run that hits the cap without passing is reported
+  as such, never silently upgraded to "PASS."
 
-## License
+## Content types — Article vs Newsletter
 
-MIT — see [`LICENSE`](LICENSE). (Create this file when setting up the repo, or ask and one will be generated.)
+`--newsletter` on `/run-research` picks which shape SEARCH AI produces —
+everything else (evidence gathering, outline approval, the quality
+audit/repair loop, citation resolution, publishing) is the identical
+pipeline either way:
 
----
+- **Article** (default) — one deep-dive report on the topic/question you
+  asked, in whichever analytical layout fits.
+- **Newsletter** — a curated-links edition: a short intro previewing the
+  theme, then one brief item (60-150 words, "what happened → why it
+  matters → source") per distinct piece of evidence the research turned
+  up. Best for a request like "this week in X" rather than a single
+  narrow question. Visuals are rarely placed — a newsletter is skimmed,
+  not illustrated — unless a section's evidence genuinely contains
+  comparable numbers worth one simple chart.
 
-*Built with FastAPI, httpx, python-docx, marked.js, KaTeX, html2canvas and jsPDF — and a great deal of adversarial debugging.*
+Still explicitly not a social-media tool either way — no hooks,
+scheduling, publishing, or engagement analytics; a generated newsletter is
+a first draft you review and send yourself, same as an article.
+
+## Citations
+
+research-writer and repair-editor cite evidence inline as `[E1]`, `[E2]`,
+... — the numbered claims from `evidence_map.json`. `final-publisher` is
+what turns those into a deduplicated, numbered References list and strips
+the raw markers from the published text; a report should never show a
+literal `[E1]` to the reader. If you ever see one, it means
+`final-publisher` was run without its `evidence_map.json` argument — check
+the exact command in `.claude/agents/final-publisher.md`.
+
+## Notes on scope
+
+This is a faithful architectural port of SEARCH AI's API Edition pipeline,
+not a reduced version of it: the same research → outline → write → audit →
+repair → visualize → publish flow, the same deterministic guardrails, the
+same delimited-markdown article format. What's genuinely different is the
+execution model — LLM reasoning steps are Claude Code subagents instead of
+direct API calls, and the deterministic steps are CLI scripts run by the
+orchestrating command instead of in-process Python functions — and there
+is no token-usage ledger, since Claude Code sessions don't expose
+per-call token accounting the way a direct API integration does.

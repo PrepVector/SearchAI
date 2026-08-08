@@ -1,0 +1,15 @@
+# ---- Python ----
+__pycache__/
+*.pyc
+
+# ---- generated research runs — keep the folder and its README, not the
+# per-run working files/output (those are personal research output, not
+# project source, and can get large with visuals/drafts) ----
+research_runs/*/
+!research_runs/README.md
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
