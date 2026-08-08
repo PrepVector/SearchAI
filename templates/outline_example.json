@@ -1,0 +1,34 @@
+{
+  "layout": "research_paper",
+  "title": "Why Neural Networks Overfit: Causes, Detection, and Mitigation",
+  "narrative_thread": "overfitting is a capacity/data mismatch, not a mysterious failure — every mitigation follows from that one idea",
+  "sections": [
+    {
+      "id": "s1-what-is-overfitting",
+      "title": "What Overfitting Actually Is",
+      "goal": "define the phenomenon precisely and distinguish it from underfitting",
+      "subpoints": ["training vs validation loss divergence", "the bias-variance framing"],
+      "bridge_from_previous": "",
+      "key_questions": ["how is overfitting formally detected, not just intuited"],
+      "wants_visual": true
+    },
+    {
+      "id": "s2-root-causes",
+      "title": "Root Causes",
+      "goal": "explain the mechanisms that produce overfitting",
+      "subpoints": ["excess model capacity", "insufficient/unrepresentative data", "training too long"],
+      "bridge_from_previous": "having defined overfitting by its symptom, the natural next question is what produces it",
+      "key_questions": ["which cause dominates in practice for modern deep nets"],
+      "wants_visual": false
+    },
+    {
+      "id": "s3-mitigations",
+      "title": "Mitigation Techniques",
+      "goal": "survey the standard toolbox and when each applies",
+      "subpoints": ["regularization (L2, dropout)", "early stopping", "data augmentation", "cross-validation"],
+      "bridge_from_previous": "each cause above maps to a specific class of fix",
+      "key_questions": ["how do these compose in a real training pipeline"],
+      "wants_visual": false
+    }
+  ]
+}
