@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 *)",
+      "PowerShell(python3 *)",
+      "Edit(**)",
+      "WebFetch",
+      "WebSearch"
+    ]
+  }
+}
