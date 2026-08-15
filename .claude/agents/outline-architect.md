@@ -14,8 +14,26 @@ grounded outline the report will be contractually bound to once approved.
 
 If the task is how-to/implementation, design a **builder's guide**:
 verb-first, step-oriented sections from setup to working result, each with
-a subpoint naming the concrete artifact it delivers. Explanatory/research
-topics get analytical section titles.
+a subpoint naming the concrete artifact it delivers (a command, config
+snippet, or file the writer must show in a fenced code block — say so
+explicitly in the subpoint, e.g. "subpoint: show the exact `.env` line").
+Explanatory/research topics get analytical section titles.
+
+## Section ordering
+
+If the evidence map contains a timeline — a mechanism's original/legacy
+behavior, its current documented state, and any dated or announced future
+change — order sections chronologically (oldest/foundational fact first,
+current state next, future implication last) rather than clustering
+sections by sub-topic and losing that arc. The final 1-2 sections should
+be where forward-looking/future-implication material belongs, not buried
+mid-report. If the evidence contains 3+ comparable data points that
+belong together (pricing tiers, before/after numbers, a feature or
+technique checklist), give that comparison its own section (or an
+explicit subpoint) rather than scattering the individual facts across
+unrelated sections — research-writer is instructed to render this as a
+real table, and it needs a section that actually groups the data for
+that table to make sense.
 
 ## Your job
 

@@ -37,11 +37,15 @@ actually supports the sentence it's attached to). Touch other sections only
 lightly.
 
 If `action` is "polish": leave structure and claims untouched; focus purely
-on cohesion, clarity, and voice.
+on cohesion, clarity, and voice — the lighter pass, not the rewrite.
 
 **Preserve** all `[E#]` markers that ARE correctly supported, LaTeX,
 tables, and code. Keep the SAME SECTION blocks — same ids, titles, order,
-none added or removed.
+none added or removed. If a rewritten section names a command, flag,
+environment variable, or config line, it belongs in a fenced code block
+(same rule research-writer follows) — don't flatten one you're preserving
+into an inline code span, and don't add new prose-only mentions of
+copy-paste syntax without one.
 
 Write the FULL corrected report in the exact same delimited format (see
 research-writer's format spec) to `<run>/draft/draft_latest.md`, overwriting
@@ -50,7 +54,7 @@ the previous version. Then re-parse and re-enforce, via Bash:
 ```
 python3 scripts/article_format.py parse <run>/draft/draft_latest.md <run>/draft/article_latest.json
 python3 scripts/outline_contract.py enforce <run>/draft/article_latest.json <run>/outline/outline.json <run>/draft/enforced_latest.json
-python3 -c "import json; d=json.load(open('<run>/draft/enforced_latest.json')); json.dump(d['article'], open('<run>/draft/article_latest.json','w'), indent=2)"
+python3 -c "import json; d=json.load(open('<run>/draft/enforced_latest.json', encoding='utf-8')); json.dump(d['article'], open('<run>/draft/article_latest.json','w', encoding='utf-8'), indent=2, ensure_ascii=False)"
 ```
 
 (This keeps `article_latest.json` as the bare, outline-enforced article

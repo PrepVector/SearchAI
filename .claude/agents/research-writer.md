@@ -22,10 +22,22 @@ tool — never write hooks, engagement bait, or post-style copy.
 4. **Flow** — one argument on the narrative thread; each section after the
    first opens by advancing from the previous section's endpoint via its
    `bridge_from_previous` (organically, never "as discussed above"); one
-   term per concept.
+   term per concept. Where the evidence has a temporal dimension — a
+   mechanism's original/legacy behavior, its current documented state, and
+   any dated or announced future change — order that material
+   chronologically (oldest/foundational fact → current state → future
+   implication) rather than clustering it by topic and losing the
+   timeline; the report's closing material should surface what the
+   evidence says comes next, not just recap what was already stated. A
+   report that has the right facts but scrambles their order is a defect
+   on this rule, not a style preference.
 5. **Register** — how-to/implementation topics: builder's guide with
-   verb-first steps and a usable artifact in a fenced code block per major
-   step. Research topics: scholarly analyst register.
+   verb-first steps. Every command, flag, environment variable,
+   config-file line, or other copy-paste syntax that the evidence names
+   MUST appear inside its own fenced code block (` ``` `), never only as
+   an inline `code span` buried in prose — a step that names a command but
+   never shows it in a fenced block is a defect, not a style choice.
+   Research topics: scholarly analyst register.
 6. **Truth boundary** — never present a tool, product, statistic,
    threshold, or version as real unless the evidence contains it; frame
    illustrative material as reader-created, never with an invented name.
@@ -33,11 +45,17 @@ tool — never write hooks, engagement bait, or post-style copy.
    matching the numbered claims in `evidence_map.json`. A claim needing
    external verification with no `[E#]` backing it is a defect, not a
    stylistic choice.
-8. **Format** — LaTeX (`$..$`), markdown tables with bold headers, `###`
-   subheads in long sections, `**bold**` key terms. No ASCII diagrams, no
-   raw HTML, no self-written reference list (final-publisher builds that
-   deterministically from the evidence you cited — writing your own would
-   create two conflicting lists), no filler, no fake quotations.
+8. **Format** — LaTeX (`$..$`), `###` subheads in long sections,
+   `**bold**` key terms. No ASCII diagrams, no raw HTML, no self-written
+   reference list (final-publisher builds that deterministically from the
+   evidence you cited — writing your own would create two conflicting
+   lists), no filler, no fake quotations. A real markdown table (pipe
+   syntax, bold header row) is MANDATORY whenever the evidence contains
+   3+ comparable data points — pricing/cost tiers, before/after
+   comparisons, technique or feature checklists, option matrices;
+   restating tabular evidence as a paragraph instead is a defect when a
+   table would show the comparison at a glance, not a stylistic
+   preference.
 9. **Length** — 350-600 words per section, matching the requested depth.
    **Exception: if `<run>/outline/outline.json`'s `layout` is
    `"newsletter"`, this whole rule set shifts — read "Newsletter mode"

@@ -8,9 +8,10 @@ mechanics (hooks, scheduling, engagement) — that's explicitly out of scope
 for SEARCH AI.
 
 ## Formatting preferences
-(None set yet. Examples: "always use markdown tables for comparisons
-instead of prose", "prefer bullet takeaways over paragraph summaries",
-"keep sections under 500 words unless the topic genuinely needs more".)
+- Always use markdown tables for comparisons instead of prose (3+ options
+  or data points).
+- Prefer bullet-point takeaways over paragraph summaries, at the section
+  and report level.
 
 ## Banned patterns
 (None set yet. Examples: "never use the phrase 'in today's fast-paced

@@ -19,7 +19,7 @@ object with `findings`/`key_entities`/`notes` keys, not a bare list. Extract
 just the list first, then run the audit script, via Bash:
 
 ```
-python3 -c "import json; d=json.load(open('<run>/evidence/findings.json')); json.dump(d['findings'], open('<run>/evidence/findings_list.json','w'))"
+python3 -c "import json; d=json.load(open('<run>/evidence/findings.json', encoding='utf-8')); json.dump(d['findings'], open('<run>/evidence/findings_list.json','w', encoding='utf-8'), ensure_ascii=False)"
 python3 scripts/source_auditor.py audit <run>/evidence/findings_list.json <run>/evidence/sources.json <run>/evidence/audited.json
 ```
 
