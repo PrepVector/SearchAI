@@ -207,18 +207,25 @@ an article.
 
 ## Subagents (`.claude/agents/`)
 
-Eleven `.md` subagent definitions, each `model: inherit` (they use
-whatever model your Claude Code session is running, no separate API key
-or billing):
+Eleven `.md` subagent definitions, each with `model: inherit` in
+frontmatter — every subagent runs whatever model your Claude Code
+session is on, rather than pinning any step to a specific tier. No
+separate API key or billing either way; this just means token spend
+tracks your session's own model choice uniformly across every step,
+from research-planner through repair-editor. Edit any agent's
+frontmatter `model:` line directly (`opus` / `sonnet` / `haiku` /
+`inherit`) if you want a specific step to run on a different tier than
+the rest.
 
 - **Reasoning specialists** — `research-planner`, `query-builder`,
   `evidence-scout`, `outline-architect`, `research-writer`,
-  `quality-auditor`, `repair-editor`, `visual-curator`. These do the
-  actual thinking; their instructions are the CC-edition equivalent of the
-  API Edition's system prompts.
+  `quality-auditor`, `repair-editor`, `visual-curator`. Their
+  instructions are the CC-edition equivalent of the API Edition's
+  system prompts.
 - **Mechanical wrappers** — `source-auditor`, `evidence-mapper`,
   `final-publisher`. Each just runs its one deterministic script against
-  the run folder's files and reports the result — no independent judgment.
+  the run folder's files and reports the result — no independent
+  judgment involved.
 
 ## Deterministic scripts (`scripts/`)
 
@@ -314,10 +321,11 @@ more individual permission prompts than necessary.
 
 A stdlib-only local HTTP server (`http.server.ThreadingHTTPServer` +
 `subprocess`, no third-party dependencies) providing a topic box, a
-START button, live progress, and outline approve/regenerate/discard
-buttons at `http://127.0.0.1:8787`. It is a thin control layer around
-Claude Code's own headless mode — it does not reimplement, bypass, or
-duplicate any part of the pipeline described above:
+START button, live progress, outline approve/edit/regenerate/discard
+controls, and per-section removal at `http://127.0.0.1:8787`. It is a
+thin control layer around Claude Code's own headless mode — it does not
+reimplement, bypass, or duplicate any part of the pipeline described
+above:
 
 - **Start** — `POST /api/start {topic, newsletter}` shells out to
   `claude -p "/run-research [--newsletter] <topic>" --output-format json`
@@ -355,6 +363,30 @@ duplicate any part of the pipeline described above:
   exits non-zero, or unparseable output all become an explicit `error`
   status with the raw stderr available in the UI's debug panel, rather
   than a hung spinner or a crashed server process.
+- **Edit outline / cut sections** — `POST /api/outline/{run_id}` writes an
+  edited outline (reworded sections, sections removed or added from the
+  dashboard) straight to `<run>/outline/outline.json` and updates the
+  in-memory copy — a plain file write, no `claude` call, so it costs no
+  pipeline turn. The next "Approve" detects the edit and tells the
+  resumed session to re-read the file fresh rather than rely on the
+  outline it last saw in conversation, since research-writer reads the
+  file, not the model's memory of it.
+- **Stalled-turn recovery (`needs_continue`)** — a real, previously-shipped
+  bug: because `<run>/outline/outline.json` is written once and never
+  deleted, the dashboard used to treat "the file still exists" as "we're
+  back at the outline checkpoint" — so if a resumed `claude -p` call ever
+  ended its turn before `output/article.md` existed (most commonly: a
+  tool call needed a permission headless mode can't grant, since the
+  folder-trust prompt only appears interactively), the dashboard silently
+  re-presented the identical, unchanged outline as a fresh approval
+  request, indistinguishable from being stuck in a loop. Fixed by
+  comparing the outline actually on disk against the one that was
+  approved: unchanged after an approve/continue means the run stalled
+  mid-pipeline, not a new decision — surfaced as its own `needs_continue`
+  status with the model's own last message shown and a **Continue**
+  button (`POST /api/decision {"action": "continue"}`) that explicitly
+  tells the resumed session it already has approval and should not ask
+  again.
 
 **Honesty about maturity:** this is a new convenience layer built on top
 of two real but less-exercised CLI behaviors (`--output-format json`'s
@@ -387,9 +419,13 @@ style/preference directives plus the feedback-cadence frontmatter), and
   images/PDFs/text/code natively; there's no separate parsing layer to
   maintain the way the API Edition's `multimodal/` package provides for a
   from-scratch web backend.
-- **No exports package, no browser UI.** The deliverable is the rendered
-  markdown file at `<run>/output/article.md`; convert it with your own
-  tools (or ask Claude Code directly) if you want a Word/PDF copy.
+- **No Word export package.** The core deliverable is the rendered
+  markdown file at `<run>/output/article.md`. The optional browser
+  dashboard (`ui/server.py`) does add PDF export via a small bundled,
+  dependency-free PDF writer — see "Browser dashboard" above for its one
+  known limitation (figures render as text placeholders in that PDF) —
+  but there is no equivalent Word/.docx export in this edition; convert
+  the markdown with your own tools if you need one.
 
 Everything else — the pipeline order, the guardrail philosophy, the
 article format, the content-type split — is the same design, ported to a

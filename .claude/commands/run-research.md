@@ -119,7 +119,7 @@ Invoke **research-writer**, told the run folder path and pointed at
 Then run, via Bash, to bring the parsed draft to outline-contract:
 ```
 python3 scripts/outline_contract.py enforce <run>/draft/article_latest.json <run>/outline/outline.json <run>/draft/enforced_v1.json
-python3 -c "import json; d=json.load(open('<run>/draft/enforced_v1.json')); json.dump(d['article'], open('<run>/draft/article_latest.json','w'), indent=2)"
+python3 -c "import json; d=json.load(open('<run>/draft/enforced_v1.json', encoding='utf-8')); json.dump(d['article'], open('<run>/draft/article_latest.json','w', encoding='utf-8'), indent=2, ensure_ascii=False)"
 ```
 Note the `alignment_score` from `enforced_v1.json` — you'll want it for
 the final report.

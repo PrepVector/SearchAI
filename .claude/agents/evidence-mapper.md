@@ -16,7 +16,7 @@ call — that's why this step is a script, not a prompt.
 that list into its own file, then run the mapper script, via Bash:
 
 ```
-python3 -c "import json; d=json.load(open('<run>/evidence/audited.json')); json.dump(d['findings'], open('<run>/evidence/audited_findings.json','w'))"
+python3 -c "import json; d=json.load(open('<run>/evidence/audited.json', encoding='utf-8')); json.dump(d['findings'], open('<run>/evidence/audited_findings.json','w', encoding='utf-8'), ensure_ascii=False)"
 python3 scripts/evidence_mapper.py build_map <run>/evidence/audited_findings.json <run>/evidence/evidence_map.json
 ```
 

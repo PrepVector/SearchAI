@@ -24,7 +24,7 @@ terminal is always the ground truth and the fallback: run
 the conversation by hand from there. Nothing this script does is
 required for /run-research to work on its own.
 
-Prerequisites (see REQUIRED.txt):
+Prerequisites (see Requirements.md):
   - `claude` must be on PATH and already logged in.
   - This project folder must already be "trusted" by Claude Code -- if
     you haven't run `claude` interactively in this exact folder since
@@ -240,20 +240,64 @@ def _do_start(run_id: str, topic: str, newsletter: bool) -> None:
 
 
 def _do_decision(run_id: str, action: str, feedback: str) -> None:
+    """Send the next turn to the resumed `claude -p` session.
+
+    `action` is one of "approve" (first approval), "continue" (re-nudge a
+    session that stopped mid-pipeline after an earlier approval without
+    finishing), or "regenerate" (free-text feedback, either on the outline
+    or answering a clarifying question).
+
+    Bug this fixes: the previous version treated "outline.json exists on
+    disk" as "we are back at the outline-approval checkpoint" -- but
+    outline.json is written once and never deleted, so after a real
+    approval it is ALWAYS still there. If the resumed session's turn ended
+    for any reason before output/article.md existed (most commonly: it hit
+    a permission Claude Code's headless mode can't grant, since the
+    one-time folder-trust prompt only appears interactively -- see
+    Requirements.md item 5), the dashboard was re-showing the exact same,
+    unchanged outline as if it were a brand-new decision -- indistinguishable
+    from "still asking for approval" and clickable forever with no progress.
+    Fixed by comparing the outline actually on disk against the one that was
+    approved: unchanged after "approve"/"continue" means the run stalled
+    mid-pipeline (status "needs_continue", with a Continue button and the
+    model's own explanation visible), not a fresh decision.
+    """
     with RUNS_LOCK:
         run = RUNS[run_id]
         session_id = run.get("session_id")
         folder = run.get("run_folder")
+        prev_outline = run.get("outline")
+        outline_dirty = bool(run.get("outline_dirty"))
+        run["outline_dirty"] = False
         run["status"] = "running"
-        run["stage"] = "generating" if action == "approve" else "revising outline"
+        run["stage"] = "generating" if action in ("approve", "continue") else "revising outline"
 
     _poll_stage_until_not_running(run_id)
 
-    if action == "approve":
-        message = ("Approved -- proceed exactly with the outline as last shown to me. "
-                   "Write the full report now and continue through the rest of the "
-                   "/run-research pipeline (audit, repair, visuals, publish) without "
-                   "stopping again.")
+    if action in ("approve", "continue"):
+        if outline_dirty and folder:
+            outline_file = f"{folder}/outline/outline.json"
+            message = (f"Approved -- I just edited {outline_file} directly on disk from "
+                       "the dashboard (sections may have been reworded, reordered, or "
+                       "removed since I last saw it in this conversation). Re-read that "
+                       "file fresh, treat its current contents as the approved outline, "
+                       "and write the full report from it now, continuing through the "
+                       "rest of the /run-research pipeline (audit, repair, visuals, "
+                       "publish) without stopping again.")
+        elif action == "continue":
+            message = ("You already have my approval on this exact outline from earlier "
+                       "in this conversation -- do not show it to me again and do not ask "
+                       "me to approve it again. Continue exactly where you left off in the "
+                       "/run-research pipeline (whichever of write / audit+repair / "
+                       "visuals / publish comes next) and do not stop until "
+                       "output/article.md exists, or you hit a genuine blocking error you "
+                       "need to tell me about (e.g. a tool call that needs a permission "
+                       "headless mode can't grant).")
+        else:
+            message = ("Approved -- proceed exactly with the outline as last shown to me. "
+                       "Write the full report now and continue through the rest of the "
+                       "/run-research pipeline (audit, repair, visuals, publish) without "
+                       "stopping again.")
     else:
         message = feedback.strip() or "Please revise the outline."
 
@@ -267,19 +311,45 @@ def _do_decision(run_id: str, action: str, feedback: str) -> None:
             run["error"] = result.get("error", "Unknown error running claude.")
             return
         run["last_message"] = result.get("result", "")
-        if folder:
-            article_path = Path(folder) / "output" / "article.md"
-            outline_path = Path(folder) / "outline" / "outline.json"
-            if article_path.exists():
-                run["article_md"] = article_path.read_text(encoding="utf-8")
-                run["status"] = "done"
-                return
-            if outline_path.exists():
-                try:
-                    run["outline"] = json.loads(outline_path.read_text(encoding="utf-8"))
-                except Exception:
-                    pass
-        run["status"] = "awaiting_decision"
+
+        article_path = Path(folder) / "output" / "article.md" if folder else None
+        if article_path and article_path.exists():
+            run["article_md"] = article_path.read_text(encoding="utf-8")
+            run["status"] = "done"
+            return
+
+        new_outline = None
+        outline_path = Path(folder) / "outline" / "outline.json" if folder else None
+        if outline_path and outline_path.exists():
+            try:
+                new_outline = json.loads(outline_path.read_text(encoding="utf-8"))
+            except Exception:
+                new_outline = prev_outline
+
+        if action not in ("approve", "continue"):
+            # Regenerating (or answering a clarifying question): whatever
+            # came back is genuinely new and needs a fresh look either way.
+            run["outline"] = new_outline
+            run["outline_was_approved"] = False
+            run["status"] = "awaiting_decision"
+        elif new_outline is not None and new_outline == prev_outline:
+            # We approved this exact outline (possibly more than once) and
+            # it is STILL sitting there unchanged with no article.md -- the
+            # pipeline stalled mid-run rather than looping back to a real
+            # decision. Surface it as a stall, not a re-ask.
+            run["outline"] = new_outline
+            run["outline_was_approved"] = True
+            run["status"] = "needs_continue"
+        elif new_outline is not None:
+            # Outline on disk changed even though we approved -- be
+            # cautious rather than assume progress; let the person look at
+            # what's actually there now before proceeding further.
+            run["outline"] = new_outline
+            run["outline_was_approved"] = False
+            run["status"] = "awaiting_decision"
+        else:
+            run["outline"] = None
+            run["status"] = "awaiting_decision"
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +383,8 @@ _PDF_FONTS = {
     "regular": ("FHR", 0.52),
     "bold": ("FHB", 0.56),
     "italic": ("FHI", 0.52),
+    "mono": ("FCR", 0.62),
+    "mono-bold": ("FCB", 0.62),
 }
 
 _UNICODE_TO_ASCII = {
@@ -362,14 +434,26 @@ def _wrap_text(text: str, font_key: str, size: float, max_width: float) -> list[
     return lines
 
 
+def _parse_table_row(line: str) -> list[str]:
+    inner = line.strip()
+    if inner.startswith("|"):
+        inner = inner[1:]
+    if inner.endswith("|"):
+        inner = inner[:-1]
+    return [c.strip() for c in inner.split("|")]
+
+
 def markdown_to_pdf_blocks(md: str) -> list[dict]:
     """Parse the delimited-article-format markdown (see render_markdown.py)
-    into simple block dicts a PDF layout pass can consume. Deliberately
-    covers only what render_markdown.py actually emits -- headings,
+    into simple block dicts a PDF layout pass can consume. Covers what
+    render_markdown.py/research-writer actually emit -- headings,
     paragraphs, bullet/numbered lists, blockquotes, image lines (become a
-    text placeholder), and single-asterisk-wrapped caption/meta lines."""
+    text placeholder), single-asterisk-wrapped caption/meta lines, fenced
+    code blocks (```), and pipe-delimited markdown tables."""
+    lines = (md or "").split("\n")
     blocks: list[dict] = []
     para_buf: list[str] = []
+    i, n = 0, len(lines)
 
     def flush_para():
         if para_buf:
@@ -378,11 +462,40 @@ def markdown_to_pdf_blocks(md: str) -> list[dict]:
                 blocks.append({"type": "p", "text": text})
             para_buf.clear()
 
-    for raw in (md or "").split("\n"):
+    while i < n:
+        raw = lines[i]
         stripped = raw.strip()
         if not stripped:
             flush_para()
+            i += 1
             continue
+
+        m_fence = re.match(r"^```(\w*)$", stripped)
+        if m_fence:
+            flush_para()
+            code_lines: list[str] = []
+            i += 1
+            while i < n and lines[i].strip() != "```":
+                code_lines.append(_pdf_normalize(lines[i].rstrip()))
+                i += 1
+            i += 1  # skip closing fence
+            blocks.append({"type": "code", "lang": m_fence.group(1),
+                           "lines": code_lines or [""]})
+            continue
+
+        if (stripped.startswith("|") and stripped.endswith("|")
+                and i + 1 < n
+                and re.match(r"^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$", lines[i + 1].strip())):
+            flush_para()
+            header = [_clean_inline(c) for c in _parse_table_row(stripped)]
+            i += 2  # skip header + separator row
+            rows: list[list[str]] = []
+            while i < n and lines[i].strip().startswith("|"):
+                rows.append([_clean_inline(c) for c in _parse_table_row(lines[i].strip())])
+                i += 1
+            blocks.append({"type": "table", "header": header, "rows": rows})
+            continue
+
         m_img = re.match(r"^!\[([^\]]*)\]\(([^)]*)\)$", stripped)
         m_num = re.match(r"^(\d+)\.\s+(.*)$", stripped)
         if stripped.startswith("### "):
@@ -409,14 +522,22 @@ def markdown_to_pdf_blocks(md: str) -> list[dict]:
             flush_para(); blocks.append({"type": "meta", "text": _clean_inline(stripped[1:-1])})
         else:
             para_buf.append(stripped)
+        i += 1
     flush_para()
     return blocks
 
 
+def _wrap_cell(text: str, font_key: str, size: float, col_w: float) -> list[str]:
+    return _wrap_text(text, font_key, size, max(1.0, col_w - 12.0)) or [""]
+
+
 def _layout_pdf_pages(blocks: list[dict]) -> list[list[tuple]]:
-    """Turn blocks into pages of (x, y, font_resource_name, size, text)
-    absolute-position draw commands, breaking to a new page whenever the
-    next line would fall below the bottom margin."""
+    """Turn blocks into pages of draw-op tuples, breaking to a new page
+    whenever the next element would fall below the bottom margin. Three op
+    shapes: ("t", x, y, font_resource_name, size, text) for a text run,
+    ("rf", x, y, w, h, gray) for a filled rectangle (table header shading,
+    code-block background), and ("ln", x1, y1, x2, y2, gray, width) for a
+    stroked line (table grid, code-block accent bar)."""
     pages: list[list[tuple]] = []
     current: list[tuple] = []
     y = [_PDF_PAGE_H - _PDF_MARGIN]
@@ -428,13 +549,63 @@ def _layout_pdf_pages(blocks: list[dict]) -> list[list[tuple]]:
         current = []
         y[0] = _PDF_PAGE_H - _PDF_MARGIN
 
+    def ensure_space(height: float):
+        if y[0] - height < _PDF_MARGIN:
+            new_page()
+
     def emit(text: str, font_key: str, size: float, indent: float = 0.0, gap_after: float = 0.0):
         line_height = size * 1.35
-        if y[0] - line_height < _PDF_MARGIN:
-            new_page()
+        ensure_space(line_height)
         font_res = _PDF_FONTS[font_key][0]
-        current.append((_PDF_MARGIN + indent, y[0], font_res, size, text))
+        current.append(("t", _PDF_MARGIN + indent, y[0], font_res, size, text))
         y[0] -= line_height + gap_after
+
+    def emit_code_block(lines: list[str]):
+        size, pad = 9.2, 6.0
+        line_height = size * 1.5
+        y[0] -= 4  # top padding before the box
+        for raw_ln in lines or [""]:
+            wrapped = _wrap_text(raw_ln, "mono", size, _PDF_CONTENT_W - 2 * pad) or [""]
+            for ln in wrapped:
+                ensure_space(line_height)
+                top = y[0] + size * 0.35
+                current.append(("rf", _PDF_MARGIN, top - line_height, _PDF_CONTENT_W, line_height, 0.93))
+                current.append(("ln", _PDF_MARGIN, top - line_height, _PDF_MARGIN, top, 0.55, 2.2))
+                current.append(("t", _PDF_MARGIN + pad, y[0], _PDF_FONTS["mono"][0], size, ln))
+                y[0] -= line_height
+        y[0] -= 8  # bottom padding after the box
+
+    def emit_table(header: list[str], rows: list[list[str]]):
+        ncols = max(1, len(header))
+        col_w = _PDF_CONTENT_W / ncols
+        size, pad_v = 9.0, 4.0
+        line_height = size * 1.3
+        all_rows = [(header, True)] + [(r, False) for r in rows]
+        y[0] -= 4  # top padding before the table
+        for cells, is_header in all_rows:
+            cells = (cells + [""] * ncols)[:ncols]
+            font_key = "bold" if is_header else "regular"
+            wrapped_cells = [_wrap_cell(c, font_key, size, col_w) for c in cells]
+            n_lines = max((len(w) for w in wrapped_cells), default=1)
+            row_h = n_lines * line_height + 2 * pad_v
+            ensure_space(row_h)
+            top = y[0]
+            bottom = top - row_h
+            if is_header:
+                current.append(("rf", _PDF_MARGIN, bottom, _PDF_CONTENT_W, row_h, 0.88))
+            current.append(("ln", _PDF_MARGIN, top, _PDF_MARGIN + _PDF_CONTENT_W, top, 0.6, 0.8))
+            current.append(("ln", _PDF_MARGIN, bottom, _PDF_MARGIN + _PDF_CONTENT_W, bottom, 0.6, 0.8))
+            for ci in range(ncols + 1):
+                vx = _PDF_MARGIN + ci * col_w
+                current.append(("ln", vx, top, vx, bottom, 0.6, 0.8))
+            for ci, wrapped in enumerate(wrapped_cells):
+                cx = _PDF_MARGIN + ci * col_w + 6
+                cy = top - pad_v - size
+                for ln in wrapped:
+                    current.append(("t", cx, cy, _PDF_FONTS[font_key][0], size, ln))
+                    cy -= line_height
+            y[0] = bottom
+        y[0] -= 10  # bottom padding after the table
 
     for b in blocks:
         t = b["type"]
@@ -473,6 +644,10 @@ def _layout_pdf_pages(blocks: list[dict]) -> list[list[tuple]]:
             y[0] -= 6
         elif t == "hr":
             y[0] -= 10
+        elif t == "code":
+            emit_code_block(b.get("lines") or [""])
+        elif t == "table":
+            emit_table(b.get("header") or [], b.get("rows") or [])
         else:  # plain paragraph
             for ln in _wrap_text(b["text"], "regular", 11, _PDF_CONTENT_W):
                 emit(ln, "regular", 11)
@@ -481,10 +656,20 @@ def _layout_pdf_pages(blocks: list[dict]) -> list[list[tuple]]:
     return pages
 
 
-def _pdf_content_stream(lines: list[tuple]) -> bytes:
+def _pdf_content_stream(ops: list[tuple]) -> bytes:
     parts = []
-    for x, y, font_res, size, text in lines:
-        parts.append(f"BT /{font_res} {size:.1f} Tf 1 0 0 1 {x:.2f} {y:.2f} Tm ({_pdf_escape(text)}) Tj ET")
+    for op in ops:
+        kind = op[0]
+        if kind == "t":
+            _, x, y, font_res, size, text = op
+            parts.append(f"0 g BT /{font_res} {size:.1f} Tf 1 0 0 1 {x:.2f} {y:.2f} Tm "
+                         f"({_pdf_escape(text)}) Tj ET")
+        elif kind == "rf":
+            _, x, y, w, h, gray = op
+            parts.append(f"{gray:.3f} g {x:.2f} {y:.2f} {w:.2f} {h:.2f} re f")
+        elif kind == "ln":
+            _, x1, y1, x2, y2, gray, width = op
+            parts.append(f"{gray:.3f} G {width:.2f} w {x1:.2f} {y1:.2f} m {x2:.2f} {y2:.2f} l S")
     return "\n".join(parts).encode("latin-1", "replace")
 
 
@@ -497,9 +682,11 @@ def build_pdf_bytes(pages_lines: list[list[tuple]]) -> bytes:
         3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
         4: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
         5: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique >>",
+        6: b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
+        7: b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold >>",
     }
     page_nums, content_nums = [], []
-    next_num = 6
+    next_num = 8
     for _ in range(n_pages):
         page_nums.append(next_num); next_num += 1
         content_nums.append(next_num); next_num += 1
@@ -509,7 +696,7 @@ def build_pdf_bytes(pages_lines: list[list[tuple]]) -> bytes:
         page_num, content_num = page_nums[i], content_nums[i]
         objects[page_num] = (
             f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {_PDF_PAGE_W} {_PDF_PAGE_H}] "
-            f"/Resources << /Font << /FHR 3 0 R /FHB 4 0 R /FHI 5 0 R >> >> "
+            f"/Resources << /Font << /FHR 3 0 R /FHB 4 0 R /FHI 5 0 R /FCR 6 0 R /FCB 7 0 R >> >> "
             f"/Contents {content_num} 0 R >>"
         ).encode()
         stream_body = _pdf_content_stream(lines)
@@ -649,6 +836,19 @@ INDEX_HTML = """<!doctype html>
   .section-item:first-child { margin-top: 0; }
   .section-item .title { font-family: var(--font-display); font-weight: 700; color: var(--ink); }
   .section-item .goal { color: var(--ink-soft); font-size: 0.88rem; margin-top: 3px; font-style: italic; }
+  .section-item-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .section-item label { font-size: .8rem; color: var(--ink-soft); display: block; }
+  .section-item input[type=text], .section-item textarea { margin-top: 4px; }
+  .section-item textarea { margin-top: 4px; margin-bottom: 0; }
+  button.small { padding: 6px 12px; font-size: .78rem; box-shadow: none; background: transparent; }
+  button.small:hover:not(:disabled) { transform: none; box-shadow: inset 3px 3px 7px var(--lo), inset -3px -3px 7px var(--hi); }
+  button.danger.small {
+    color: #C7473D; background: rgba(199,71,61,.10); box-shadow: none;
+  }
+  button.danger.small:hover:not(:disabled) {
+    transform: none; background: rgba(199,71,61,.18);
+    box-shadow: inset 3px 3px 7px rgba(199,71,61,.15), inset -3px -3px 7px rgba(255,255,255,.5);
+  }
   pre.article {
     white-space: pre-wrap; word-wrap: break-word; max-height: 60vh; overflow: auto;
     background: var(--base-deep); border-radius: 16px; padding: 16px 18px;
@@ -690,6 +890,26 @@ INDEX_HTML = """<!doctype html>
   }
   .article-view hr { border: none; border-top: 1px solid rgba(110,119,150,.22); margin: 20px 0; }
   .article-view .meta-line { color: var(--ink-soft); font-size: 0.85rem; margin: -4px 0 16px; }
+  .article-view pre.code-box {
+    font-family: var(--font-mono); font-size: 0.84rem; line-height: 1.55; overflow-x: auto;
+    background: #232842; color: #E7EBFA; padding: 16px 18px; border-radius: 12px;
+    margin: 8px 0 16px; border-left: 4px solid var(--accent-deep);
+    box-shadow: inset 0 2px 12px rgba(0,0,0,.35);
+  }
+  .article-view pre.code-box code { background: none; color: inherit; padding: 0; font-weight: 400; }
+  .article-view table {
+    width: 100%; border-collapse: collapse; margin: 10px 0 18px; font-size: 0.9rem;
+    border-radius: 12px; overflow: hidden; box-shadow: -4px -4px 10px var(--hi), 4px 4px 12px var(--lo);
+  }
+  .article-view thead th {
+    text-align: left; font-family: var(--font-display); font-weight: 700; color: var(--ink);
+    background: rgba(79,107,240,.10); padding: 10px 14px; border-bottom: 2px solid rgba(79,107,240,.22);
+  }
+  .article-view tbody td {
+    padding: 9px 14px; border-bottom: 1px solid rgba(110,119,150,.18); color: #2A3049;
+  }
+  .article-view tbody tr:last-child td { border-bottom: none; }
+  .article-view tbody tr:nth-child(even) { background: rgba(110,119,150,.05); }
   .muted { color: var(--ink-soft); font-size: 0.85rem; }
   .error-box {
     background: #FBEAE8; color: #8a2b22; border-left: 5px solid var(--bad);
@@ -764,6 +984,8 @@ async function startRun() {
   document.getElementById('start-hint').textContent = '';
   if (data.error) { alert(data.error); return; }
   currentRunId = data.run_id;
+  editingOutline = false;
+  outlineDraft = null;
   document.getElementById('topic').value = '';
   poll();
   loadHistory();
@@ -771,6 +993,8 @@ async function startRun() {
 
 function selectRun(id) {
   currentRunId = id;
+  editingOutline = false;  // don't carry a stale draft over from a different run
+  outlineDraft = null;
   poll();
 }
 
@@ -786,6 +1010,112 @@ async function decide(action) {
     body: JSON.stringify({action, feedback})
   });
   poll();
+}
+
+// ---------------------------------------------------------------------
+// Outline editor -- lets you reword sections or cut ones you don't want
+// before approving, without spending a pipeline turn on a full
+// regenerate. Edits are held in `outlineDraft` (a working copy) until
+// "Save Changes" writes them straight to outline.json via
+// POST /api/outline/<run_id> -- a pure local file write, no `claude`
+// call involved. `quickRemoveSection` is the one-click shortcut for the
+// common "just cut this section" case, without entering edit mode.
+// ---------------------------------------------------------------------
+let editingOutline = false;
+let outlineDraft = null;
+
+async function saveOutline(outline) {
+  const res = await fetch(`/api/outline/${currentRunId}`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({outline})
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return false; }
+  return true;
+}
+
+async function quickRemoveSection(idx) {
+  const run = window._lastRun;
+  if (!run || !run.outline) return;
+  if (!confirm(`Remove "${run.outline.sections[idx].title || 'this section'}" from the outline?`)) return;
+  const sections = run.outline.sections.slice();
+  sections.splice(idx, 1);
+  if (!sections.length) { alert('Keep at least one section -- edit the outline instead of removing the last one.'); return; }
+  const ok = await saveOutline({...run.outline, sections});
+  if (ok) poll();
+}
+
+function startEditOutline() {
+  const run = window._lastRun;
+  if (!run || !run.outline) return;
+  editingOutline = true;
+  outlineDraft = JSON.parse(JSON.stringify(run.outline));
+  render(run);
+}
+
+function cancelEditOutline() {
+  editingOutline = false;
+  outlineDraft = null;
+  render(window._lastRun);
+}
+
+function syncDraftFromDom() {
+  if (!outlineDraft) return;
+  document.querySelectorAll('[data-section-field]').forEach(el => {
+    const idx = parseInt(el.dataset.sectionIdx, 10);
+    const field = el.dataset.sectionField;
+    if (outlineDraft.sections[idx]) outlineDraft.sections[idx][field] = el.value;
+  });
+  const titleEl = document.getElementById('outline-title-edit');
+  if (titleEl) outlineDraft.title = titleEl.value;
+}
+
+function draftRemoveSection(idx) {
+  syncDraftFromDom();
+  outlineDraft.sections.splice(idx, 1);
+  render(window._lastRun);
+}
+
+function draftAddSection() {
+  syncDraftFromDom();
+  const n = outlineDraft.sections.length + 1;
+  outlineDraft.sections.push({id: `s${n}-new`, title: 'New section', goal: '',
+    subpoints: [], key_questions: [], bridge_from_previous: '', wants_visual: false});
+  render(window._lastRun);
+}
+
+async function saveOutlineEdits() {
+  syncDraftFromDom();
+  if (!outlineDraft.sections.length) {
+    alert('Keep at least one section -- the pipeline needs at least one to write from.');
+    return;
+  }
+  const ok = await saveOutline(outlineDraft);
+  if (!ok) return;
+  editingOutline = false;
+  outlineDraft = null;
+  poll();
+}
+
+function renderOutlineEditor(outline) {
+  let html = `<p><strong>Editing outline.</strong> Reword sections or remove ones you don't want, then save -- this writes straight to the outline file, no regeneration turn spent.</p>`;
+  html += `<label for="outline-title-edit">Report title</label>`;
+  html += `<input type="text" id="outline-title-edit" value="${escapeHtml(outline.title || '')}">`;
+  (outline.sections || []).forEach((s, idx) => {
+    html += `<div class="section-item">
+      <label>Section ${idx + 1} title</label>
+      <input type="text" data-section-idx="${idx}" data-section-field="title" value="${escapeHtml(s.title || '')}">
+      <label style="margin-top:8px;">Goal</label>
+      <textarea rows="2" data-section-idx="${idx}" data-section-field="goal">${escapeHtml(s.goal || '')}</textarea>
+      <button class="danger small" style="margin-top:8px;" onclick="draftRemoveSection(${idx})">Remove Section</button>
+    </div>`;
+  });
+  html += `<div style="margin-top:14px;"><button class="secondary" onclick="draftAddSection()">+ Add Section</button></div>`;
+  html += `<div style="margin-top:14px;">
+    <button onclick="saveOutlineEdits()">Save Changes</button>
+    <button class="secondary" onclick="cancelEditOutline()">Cancel</button>
+  </div>`;
+  return html;
 }
 
 async function sendReply() {
@@ -827,15 +1157,29 @@ function render(run) {
   if (run.status === 'starting' || run.status === 'running') {
     html += `<p class="stage"><span class="dot"></span> ${escapeHtml(run.stage || 'working')}...</p>`;
     html += `<p class="muted">This can take a few minutes, especially while real web sources are being gathered. Feel free to leave this tab open and come back.</p>`;
+  } else if (run.status === 'awaiting_decision' && run.outline && editingOutline && outlineDraft) {
+    html += renderOutlineEditor(outlineDraft);
   } else if (run.status === 'awaiting_decision' && run.outline) {
     html += `<p><strong>Outline ready for review.</strong> Nothing is written in full until you approve it.</p>`;
     html += `<p class="muted">Layout: ${escapeHtml(run.outline.layout || 'auto')}${run.outline.narrative_thread ? ' -- ' + escapeHtml(run.outline.narrative_thread) : ''}</p>`;
-    (run.outline.sections || []).forEach(s => {
-      html += `<div class="section-item"><div class="title">${escapeHtml(s.title || '')}</div><div class="goal">${escapeHtml(s.goal || '')}</div></div>`;
+    (run.outline.sections || []).forEach((s, idx) => {
+      html += `<div class="section-item"><div class="section-item-row">
+        <div><div class="title">${escapeHtml(s.title || '')}</div><div class="goal">${escapeHtml(s.goal || '')}</div></div>
+        <button class="small" onclick="quickRemoveSection(${idx})" title="Remove this section">&times;</button>
+      </div></div>`;
     });
     html += `<div style="margin-top:14px;">
       <button onclick="decide('approve')">Approve &amp; Write Full Report</button>
+      <button class="secondary" onclick="startEditOutline()">Edit Outline</button>
       <button class="secondary" onclick="decide('regenerate')">Regenerate with Feedback</button>
+      <button class="danger" onclick="decide('discard')">Discard</button>
+    </div>`;
+  } else if (run.status === 'needs_continue') {
+    html += `<p><strong>Paused mid-report.</strong> This outline was already approved, but the last step ended before the report finished -- nothing further has been written since then.</p>`;
+    html += `<p class="muted">Common cause: a step needed a permission headless mode can't grant on its own -- see Requirements.md item 5 (run <code>claude</code> once interactively in this project folder and accept the one-time trust prompt), then Continue. Claude's own last message is below.</p>`;
+    html += `<pre class="article">${escapeHtml(run.last_message || '(no message captured -- see debug panel)')}</pre>`;
+    html += `<div style="margin-top:10px;">
+      <button onclick="decide('continue')">Continue</button>
       <button class="danger" onclick="decide('discard')">Discard</button>
     </div>`;
   } else if (run.status === 'awaiting_decision' && !run.outline) {
@@ -892,13 +1236,14 @@ function mdInline(text, runId) {
   return s;
 }
 
-// Renders the exact markdown shape scripts/render_markdown.py produces
-// (headings, paragraphs, bullet/numbered lists, blockquotes, image lines,
-// a single horizontal rule, and single-asterisk meta/caption lines) as
-// on-screen HTML. This is intentionally tailored to that known shape, not
-// a general markdown parser. Images are rewritten to fetch through
-// /api/asset/<runId>/<path> since the raw report references files on disk
-// relative to the run folder, which the browser can't reach directly.
+// Renders the markdown shape scripts/render_markdown.py / research-writer
+// produce (headings, paragraphs, bullet/numbered lists, blockquotes, image
+// lines, a horizontal rule, single-asterisk meta/caption lines, fenced code
+// blocks, and pipe-delimited tables) as on-screen HTML. This is
+// intentionally tailored to that known shape, not a general markdown
+// parser. Images are rewritten to fetch through /api/asset/<runId>/<path>
+// since the raw report references files on disk relative to the run
+// folder, which the browser can't reach directly.
 function mdToHtml(md, runId) {
   const lines = (md || '').split('\\n');
   let html = '';
@@ -914,10 +1259,46 @@ function mdToHtml(md, runId) {
   function closeList() {
     if (listType) { html += `</${listType}>`; listType = null; }
   }
+  function parseTableRow(line) {
+    let inner = line.trim();
+    if (inner.startsWith('|')) inner = inner.slice(1);
+    if (inner.endsWith('|')) inner = inner.slice(0, -1);
+    return inner.split('|').map(c => c.trim());
+  }
 
-  for (const raw of lines) {
+  let i = 0;
+  while (i < lines.length) {
+    const raw = lines[i];
     const line = raw.trim();
-    if (!line) { flushPara(); continue; }
+    if (!line) { flushPara(); i++; continue; }
+
+    const mFence = line.match(/^```(\w*)$/);
+    if (mFence) {
+      flushPara(); closeList();
+      const codeLines = [];
+      i++;
+      while (i < lines.length && lines[i].trim() !== '```') { codeLines.push(lines[i]); i++; }
+      i++; // skip closing fence
+      html += `<pre class="code-box"><code>${escapeHtml(codeLines.join('\\n'))}</code></pre>`;
+      continue;
+    }
+
+    const isSepRow = s => /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/.test(s);
+    if (line.startsWith('|') && line.endsWith('|') && i + 1 < lines.length && isSepRow(lines[i + 1].trim())) {
+      flushPara(); closeList();
+      const header = parseTableRow(line);
+      i += 2; // skip header + separator
+      const bodyRows = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        bodyRows.push(parseTableRow(lines[i].trim())); i++;
+      }
+      html += '<table><thead><tr>' +
+        header.map(c => `<th>${mdInline(c, runId)}</th>`).join('') + '</tr></thead><tbody>' +
+        bodyRows.map(r => '<tr>' + r.map(c => `<td>${mdInline(c, runId)}</td>`).join('') + '</tr>').join('') +
+        '</tbody></table>';
+      continue;
+    }
+
     const mImg = line.match(/^!\[([^\]]*)\]\(([^)]*)\)$/);
     const mNum = line.match(/^(\d+)\.\s+(.*)$/);
     if (line.startsWith('### ')) {
@@ -950,6 +1331,7 @@ function mdToHtml(md, runId) {
       closeList();
       para.push(line);
     }
+    i++;
   }
   flushPara(); closeList();
   return html || '<p class="muted">(empty report)</p>';
@@ -1100,6 +1482,7 @@ class Handler(BaseHTTPRequestHandler):
                     "id": run_id, "topic": topic, "newsletter": newsletter,
                     "status": "starting", "stage": "starting", "created": time.time(),
                     "run_folder": None, "session_id": None, "outline": None,
+                    "outline_dirty": False, "outline_was_approved": False,
                     "article_md": None, "last_message": "", "error": None,
                 }
             _background(run_id, _do_start, run_id, topic, newsletter)
@@ -1115,8 +1498,9 @@ class Handler(BaseHTTPRequestHandler):
             body = self._read_json_body()
             action = body.get("action")
             feedback = body.get("feedback", "")
-            if action not in ("approve", "regenerate", "discard"):
-                self._send_json({"error": "action must be approve, regenerate, or discard"}, status=400)
+            if action not in ("approve", "regenerate", "discard", "continue"):
+                self._send_json({"error": "action must be approve, continue, regenerate, or discard"},
+                               status=400)
                 return
             if action == "discard":
                 with RUNS_LOCK:
@@ -1124,6 +1508,48 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True})
                 return
             _background(run_id, _do_decision, run_id, action, feedback)
+            self._send_json({"ok": True})
+            return
+        m = re.match(r"^/api/outline/([a-f0-9]+)$", path)
+        if m:
+            # Applies a dashboard-edited outline (reworded sections, or
+            # sections cut) straight to <run>/outline/outline.json, mirroring
+            # /run-research's own instruction that small edits are applied
+            # directly rather than re-invoking outline-architect. This is a
+            # pure local file write -- no `claude` call, so it's instant and
+            # doesn't consume a pipeline turn. The next "Approve" tells the
+            # resumed session to re-read the file rather than rely on
+            # whatever outline it last saw in conversation.
+            run_id = m.group(1)
+            with RUNS_LOCK:
+                run = RUNS.get(run_id)
+                folder = run.get("run_folder") if run else None
+            if run is None:
+                self._send_json({"error": "unknown run_id"}, status=404)
+                return
+            if not folder:
+                self._send_json({"error": "this run has no folder on disk yet"}, status=400)
+                return
+            body = self._read_json_body()
+            outline = body.get("outline")
+            if (not isinstance(outline, dict) or not isinstance(outline.get("sections"), list)
+                    or not outline["sections"]):
+                self._send_json({"error": "outline must include a non-empty sections list "
+                                          "-- an outline with zero sections can't be approved"},
+                               status=400)
+                return
+            outline_path = Path(folder) / "outline" / "outline.json"
+            try:
+                outline_path.write_text(json.dumps(outline, indent=2, ensure_ascii=False),
+                                        encoding="utf-8")
+            except Exception as exc:
+                self._send_json({"error": f"failed to save outline: {exc}"}, status=500)
+                return
+            with RUNS_LOCK:
+                if run_id in RUNS:
+                    RUNS[run_id]["outline"] = outline
+                    RUNS[run_id]["outline_dirty"] = True
+                    RUNS[run_id]["outline_was_approved"] = False
             self._send_json({"ok": True})
             return
         self._send_json({"error": "not found"}, status=404)

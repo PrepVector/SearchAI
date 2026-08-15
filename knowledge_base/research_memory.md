@@ -1,5 +1,5 @@
 ---
-search_count: 0
+search_count: 1
 last_feedback_count: 0
 feedback_every_n: 30
 ---
